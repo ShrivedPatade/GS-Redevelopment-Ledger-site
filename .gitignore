@@ -10,6 +10,12 @@
 !.yarn/releases
 !.yarn/versions
 
+# Private society files (Never commit to Git)
+*.csv
+*.xlsx
+PRIVATE_PINS.txt
+
+
 # testing
 /coverage
 
