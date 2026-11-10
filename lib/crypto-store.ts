@@ -5,7 +5,7 @@ import { Redis } from '@upstash/redis';
 import { FlatRecord } from '@/types/ledger';
 
 const SECRET_HEX = process.env.LEDGER_SECRET_KEY || '';
-const REDIS_KEY = 'society_ledger_enc_v1';
+const REDIS_KEY = 'society_ledger_enc_v2';
 
 // Supports both standard Upstash env vars and Vercel KV Marketplace env vars
 const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
