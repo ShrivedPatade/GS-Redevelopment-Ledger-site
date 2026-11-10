@@ -1,11 +1,20 @@
-export type PaymentMode = 'CASH' | 'CHEQUE' | '';
+export type PaymentMode = 'CASH' | 'CHEQUE';
+export type MilestoneStatus = 'PAID' | 'PARTIALLY_PAID' | 'PENDING';
+
+export interface PaymentEntry {
+  mode: PaymentMode;
+  chequeNo: string;
+  date: string; // YYYY-MM-DD
+  amount: number;
+}
 
 export interface PaymentMilestone {
   name: string;
-  amount: number;
-  status: 'PAID' | 'PENDING';
-  mode: PaymentMode;
-  chequeNo: string;
+  amount: number; // Editable by Committee
+  amountPaid: number; // Sum of paymentInfo[].amount
+  status: MilestoneStatus;
+  paymentInfo: PaymentEntry[]; // Expandable list of payments for this stage
+  remark: string; // Viewable on all devices, editable by Committee
 }
 
 export interface FlatRecord {

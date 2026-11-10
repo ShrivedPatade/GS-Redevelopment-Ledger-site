@@ -5,12 +5,60 @@ import {
   readAuthHashes,
   verifyPin,
 } from '@/lib/crypto-store';
-import { FlatRecord, PaymentMilestone } from '@/types/ledger';
+import { FlatRecord, PaymentMilestone, PaymentEntry, MilestoneStatus } from '@/types/ledger';
+
+// Ensures backwards compatibility if existing Redis records lack paymentInfo or remark
+function normalizeRecord(record: FlatRecord): FlatRecord {
+  if (!record.payments) return record;
+
+  const normalizedPayments: PaymentMilestone[] = record.payments.map((p) => {
+    const rawAny = p as unknown as Record<string, unknown>;
+    let paymentInfo: PaymentEntry[] = Array.isArray(p.paymentInfo) ? p.paymentInfo : [];
+
+    // Migrate old single-payment fields if paymentInfo wasn't initialized yet
+    if (!Array.isArray(p.paymentInfo) && p.status === 'PAID') {
+      paymentInfo = [
+        {
+          mode: rawAny.mode === 'CHEQUE' ? 'CHEQUE' : 'CASH',
+          chequeNo: String(rawAny.chequeNo || ''),
+          date: String(rawAny.paymentDate || ''),
+          amount: Number(p.amount) || 0,
+        },
+      ];
+    }
+
+    const amountPaid = paymentInfo.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+
+    return {
+      name: p.name,
+      amount: Number(p.amount) || 0,
+      amountPaid,
+      status:
+        p.status === 'PAID' || p.status === 'PARTIALLY_PAID' ? p.status : 'PENDING',
+      paymentInfo,
+      remark: String(p.remark || ''),
+    };
+  });
+
+  const paid = normalizedPayments.reduce((sum, p) => sum + p.amountPaid, 0);
+  const toPay = normalizedPayments.reduce(
+    (sum, p) => sum + Math.max(0, p.amount - p.amountPaid),
+    0
+  );
+
+  return {
+    ...record,
+    payments: normalizedPayments,
+    paid,
+    toPay,
+  };
+}
 
 export async function POST(req: NextRequest) {
   try {
     const { authType, wing, flatNo, password } = await req.json();
-    const records = await readEncryptedLedger();
+    const rawRecords = await readEncryptedLedger();
+    const records = rawRecords.map(normalizeRecord);
     const hashes = readAuthHashes();
     const cleanPin = String(password || '').trim();
 
@@ -77,26 +125,40 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    const records = await readEncryptedLedger();
+    const rawRecords = await readEncryptedLedger();
+    const records = rawRecords.map(normalizeRecord);
     const targetIndex = records.findIndex((r) => r.id === flatId);
     if (targetIndex === -1) {
       return NextResponse.json({ error: 'Flat not found' }, { status: 404 });
     }
 
-    const sanitizedPayments: PaymentMilestone[] = payments.map((p) => ({
-      name: p.name,
-      amount: Number(p.amount) || 0,
-      status: p.status === 'PAID' ? 'PAID' : 'PENDING',
-      mode: p.status === 'PAID' ? p.mode : '',
-      chequeNo: p.status === 'PAID' && p.mode === 'CHEQUE' ? (p.chequeNo || '').trim() : '',
-    }));
+    const sanitizedPayments: PaymentMilestone[] = payments.map((p) => {
+      const cleanEntries: PaymentEntry[] = (p.paymentInfo || []).map((entry) => ({
+        mode: entry.mode === 'CHEQUE' ? 'CHEQUE' : 'CASH',
+        chequeNo: entry.mode === 'CHEQUE' ? (entry.chequeNo || '').trim() : '',
+        date: (entry.date || '').trim(),
+        amount: Math.max(0, Number(entry.amount) || 0),
+      }));
 
-    const paid = sanitizedPayments
-      .filter((p) => p.status === 'PAID')
-      .reduce((sum, p) => sum + p.amount, 0);
-    const toPay = sanitizedPayments
-      .filter((p) => p.status === 'PENDING')
-      .reduce((sum, p) => sum + p.amount, 0);
+      const amountPaid = cleanEntries.reduce((sum, item) => sum + item.amount, 0);
+      const validStatus: MilestoneStatus =
+        p.status === 'PAID' || p.status === 'PARTIALLY_PAID' ? p.status : 'PENDING';
+
+      return {
+        name: p.name,
+        amount: Math.max(0, Number(p.amount) || 0),
+        amountPaid,
+        status: validStatus,
+        paymentInfo: cleanEntries,
+        remark: (p.remark || '').trim(),
+      };
+    });
+
+    const paid = sanitizedPayments.reduce((sum, p) => sum + p.amountPaid, 0);
+    const toPay = sanitizedPayments.reduce(
+      (sum, p) => sum + Math.max(0, p.amount - p.amountPaid),
+      0
+    );
 
     records[targetIndex] = {
       ...records[targetIndex],

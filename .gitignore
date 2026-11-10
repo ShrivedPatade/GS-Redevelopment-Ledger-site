@@ -14,7 +14,7 @@
 *.csv
 *.xlsx
 PRIVATE_PINS.txt
-
+refactor_csv.py
 
 # testing
 /coverage
